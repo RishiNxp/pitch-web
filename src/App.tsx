@@ -3,7 +3,9 @@ import { createEmptySketch } from './demo';
 import BeltPanel from './components/BeltPanel';
 import DrivePanel from './components/DrivePanel';
 import PropertiesPanel from './components/PropertiesPanel';
+import OrderPanel from './components/OrderPanel';
 import SketchCanvas from './components/SketchCanvas';
+import { Preferences, defaults, type Bindings } from './components/Preferences';
 import Toolbar from './components/Toolbar';
 import WelcomePage from './components/WelcomePage';
 import Icon from './components/Icon';
@@ -121,6 +123,12 @@ function restoreLayout(): Sketch | null {
 }
 
 export default function App() {
+  const [settings,setSettings] = useState(false);
+  const [collapsed,setCollapsed] = useState(false);
+  const [light,setLight] = useState(()=>localStorage.getItem('pitch.theme')==='light');
+  const [binds,setBinds] = useState<Bindings>(()=>{try{return {...defaults,...JSON.parse(localStorage.getItem('pitch.keys')||'{}')}}catch{return defaults}});
+  useEffect(()=>{document.documentElement.dataset.theme=light?'light':'dark';localStorage.setItem('pitch.theme',light?'light':'dark')},[light]);
+  useEffect(()=>{localStorage.setItem('pitch.keys',JSON.stringify(binds))},[binds]);
   const [restored] = useState(restoreLayout);
   const [history, setHistory] = useState<HistoryState>(() => ({
     past: [], present: restored ?? createEmptySketch(), future: [], activeEdit: null,
@@ -160,14 +168,16 @@ export default function App() {
     setHistory((current) => reduceSketch(current, action));
   };
 
-  const addPulleyAt = (point: Point, span?: LineSegment) => {
+  const addPulleyAt = (point: Point, span?: LineSegment, beltId?: string) => {
     const id = nextId('P', sketch);
-    const pulley = span ? createPulleyOnSpan(sketch, span, point, id)
+    const belt = sketch.transmission?.belts.find(b=>b.id===beltId);
+    const pulley = span ? createPulleyOnSpan(belt ? sketchForBeltStage(sketch,belt) : sketch, span, point, id)
       : { id, label: id, toothCount: 20, profile: sketch.profile, ...point, isOrigin: false };
     if (!pulley) {
       setInteractionNotice('No clearance for a 20T pulley here. Choose a longer belt span or move nearby pulleys.');
       return;
     }
+    if (belt && belt.id!==sketch.activeBeltId) dispatch({type:'SET_ACTIVE_BELT',id:belt.id});
     dispatch({ type: 'ADD_PULLEY', pulley, ...(span ? { segment: { fromId: span.fromId, toId: span.toId } } : {}) });
     setSelectedId(id);
     if (span) setTool('select');
@@ -288,7 +298,14 @@ export default function App() {
     setConfirmNewLayout(false);
   };
 
+  const [entering,setEntering] = useState(false);
+  useEffect(()=>{
+    if (!entering) return;
+    const timer = window.setTimeout(()=>setEntering(false),800);
+    return ()=>window.clearTimeout(timer);
+  },[entering]);
   const enterCalculator = () => {
+    setEntering(!window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     setGuidePage(0);
     setShowTips(true);
     setPage('calculator');
@@ -330,7 +347,7 @@ export default function App() {
   const resetView = () => dispatch({ type: 'SET_VIEW', view: { centerX: 0, centerY: 0, zoom: 1 } });
 
   useEffect(() => {
-    if (page !== 'calculator') return;
+    if (page !== 'calculator' || settings) return;
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
       const editingText = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable);
@@ -368,14 +385,12 @@ export default function App() {
         return;
       }
       if (event.ctrlKey || event.metaKey || event.altKey) return;
-      if (event.key.toLowerCase() === 'v') setTool('select');
-      if (event.key.toLowerCase() === 'x') setTool('dimension-horizontal');
-      if (event.key.toLowerCase() === 'y') setTool('dimension-vertical');
-      if (event.key.toLowerCase() === 'd') setTool('dimension-aligned');
+      const match = Object.entries(binds).find(([,key])=>key===event.key.toLowerCase());
+      if (match) { event.preventDefault(); setTool(match[0] as SketchTool); }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [page, selectedId, sketch, tool]);
+  }, [page, selectedId, sketch, tool, binds, settings]);
 
   const routeClosed = sketch.route.length >= 3 && sketch.route[0] === sketch.route.at(-1);
   const guidance = layoutGuidance(sketch, routeClosed, tool, geometry);
@@ -388,16 +403,13 @@ export default function App() {
     }
   };
 
-  if (page === 'welcome') return <div className="welcome-shell">
+  return <>
     <input ref={fileInputRef} type="file" accept="application/json,.json" hidden onChange={event => void openFile(event.target.files?.[0])} />
-    <WelcomePage
-      onStart={enterCalculator}
-      onOpenFile={() => fileInputRef.current?.click()}
-    />
-  </div>;
-
-  return (
-    <div className="app-shell" onKeyDown={event => {
+    {(page === 'welcome' || entering) && <div className={'welcome-shell'+(entering?' layout-handoff':'')} inert={entering}
+      onAnimationEnd={event=>{if(event.target===event.currentTarget && event.animationName==='welcome-release')setEntering(false)}}>
+      <WelcomePage onStart={enterCalculator} onOpenFile={()=>fileInputRef.current?.click()}/>
+    </div>}
+    {page === 'calculator' && <div className="app-shell" inert={entering} onKeyDown={event => {
       const field = event.target;
       if (event.key === 'Enter' && !event.nativeEvent.isComposing && (field instanceof HTMLInputElement || field instanceof HTMLSelectElement)) {
         event.stopPropagation();
@@ -405,13 +417,13 @@ export default function App() {
       }
     }}>
       <header className="topbar">
-        <div className="brand">
+        <button className="brand" aria-label="Return to Pitch home" onClick={()=>setPage("welcome")}>
           <div className="brand-mark"><img className="pitch-logo" src="/pitch-logo.png" alt="" /></div>
           <div className="brand-name"><b>Pitch</b><small>ROBOTICS DRIVE LAYOUT</small></div>
-        </div>
+        </button>
         <div className="topbar-spacer" />
-        <div className="topbar-controls">
-          <input ref={fileInputRef} type="file" accept="application/json,.json" hidden onChange={event => void openFile(event.target.files?.[0])} />
+        <div className="topbar-controls"><button className="topbar-action" onClick={()=>setSettings(true)}>Settings</button>
+
           <button className="topbar-action" type="button" onClick={() => fileInputRef.current?.click()}><Icon name="folder" size={15} />Open file</button>
           <button className="topbar-action" type="button" onClick={saveFile}><Icon name="save" size={15} />Save file</button>
           {!showTips && <button className="topbar-action" type="button" onClick={toggleTips}>
@@ -429,7 +441,8 @@ export default function App() {
         </div>
       </header>
 
-      <Toolbar
+      {settings && <Preferences binds={binds} setBinds={setBinds} light={light} setLight={setLight} close={()=>setSettings(false)}/>}
+      <Toolbar binds={binds}
         tool={tool}
         canUndo={history.past.length > 0 || history.activeEdit !== null}
         canRedo={history.future.length > 0}
@@ -440,7 +453,7 @@ export default function App() {
         onReset={resetView}
       />
 
-      <main className="workspace-shell">
+      <main className={"workspace-shell"+(collapsed?" collapsed":"")}>
         <aside className="inspector-panel" aria-label="Design properties">
           <div className="pinned-belt-teeth"><span>Belt teeth{sketch.activeBeltId ? ' · ' + sketch.activeBeltId : ''}</span><strong>{geometry.valid && sketch.activeBeltId ? geometry.nearestTeeth + 'T' : '—'}</strong></div>
           <PropertiesPanel sketch={sketch} selectedId={selectedId} onAction={dispatch} onDelete={deleteSelection} onSelect={setSelectedId} onStartAxleStage={startAxleStage} onAddCoaxialPulley={addCoaxialPulley} />
@@ -451,14 +464,15 @@ export default function App() {
               setSelectedId(action.id ? 'BELT' : null);
             } else if (action.type === 'ADD_BELT_STAGE') setTool('route');
           }} />
+          <OrderPanel sketch={sketch} onAction={dispatch} />
           <DrivePanel sketch={sketch} geometry={geometry} onAction={dispatch} />
         </aside>
         <section className="center-workspace" aria-label="Sketch canvas">
-          <div className="workspace-subbar">
+          <div className="workspace-subbar"><button aria-label={collapsed?"Show properties":"Hide properties"} aria-expanded={!collapsed} onClick={()=>setCollapsed(!collapsed)}>{collapsed?"+":"−"}</button>
             <span className="view-chip">2D SKETCH</span><span className="subbar-divider" /><span className="subbar-value">XY PLANE</span>
             <div className={`workspace-status${routeClosed && !geometry.valid ? ' invalid' : ''}`}><i />{routeClosed ? geometry.valid ? 'BELT ROUTE CLOSED' : 'INVALID BELT GEOMETRY' : 'SKETCH EDITING'}</div>
           </div>
-          <SketchCanvas
+          <SketchCanvas onShortcuts={()=>setSettings(true)}
             sketch={sketch}
             geometry={geometry}
             selectedId={selectedId}
@@ -510,6 +524,6 @@ export default function App() {
           </section>}
         </section>
       </main>
-    </div>
-  );
+    </div>}
+  </>;
 }

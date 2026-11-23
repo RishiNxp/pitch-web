@@ -1,4 +1,4 @@
-export type BeltProfile = 'GT2' | 'GT3' | 'HTD 5M';
+export type BeltProfile = 'GT2' | 'GT2 3mm' | 'GT3' | 'HTD 5M';
 export type SketchTool =
   | 'select'
   | 'pan'
@@ -17,6 +17,7 @@ export type Point = { x: number; y: number };
 import type { Transmission } from './transmission';
 
 export type Pulley = {
+  catalogSku?: string;
   id: string;
   label: string;
   toothCount: number;

@@ -33,6 +33,7 @@ type SolvedPath = {
 
 const profilePitches: Record<BeltProfile, number> = {
   GT2: 2,
+  'GT2 3mm': 3,
   GT3: 3,
   'HTD 5M': 5,
 };

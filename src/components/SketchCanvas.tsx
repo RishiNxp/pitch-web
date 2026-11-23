@@ -1,7 +1,8 @@
+import { CatalogField } from './OrderPanel';
 import { NumberField } from './PropertiesPanel';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
-import { calculateBeltGeometry, pitchDiameter } from '../geometry';
+import { beltWinding, calculateBeltGeometry, pitchDiameter } from '../geometry';
 import type {
   ArcSegment,
   BeltGeometryResult,
@@ -12,7 +13,7 @@ import type {
   SketchDimension,
   SketchTool,
 } from '../model';
-import { findBeltSpan, removeIdlerFromBeltRoute } from '../tensioner';
+import { createTensionerOnSpan, findBeltSpan, removeIdlerFromBeltRoute } from '../tensioner';
 import {
   fitViewportToObjects,
   panView,
@@ -21,7 +22,7 @@ import {
   zoomViewAt,
 } from '../viewport';
 import type { Camera, ViewportSize } from '../viewport';
-import { snapDraggedGear, type SketchAction } from '../state';
+import { insertRouteMember, snapDraggedGear, type SketchAction } from '../state';
 import { hasOtherPulleyOnBeltAxle, sketchForBeltStage } from '../transmission';
 import Icon from './Icon';
 import type { IconName } from './Icon';
@@ -61,12 +62,13 @@ type SketchCanvasProps = {
   onNotice: (notice: string | null) => void;
   onViewChange: (view: Camera) => void;
   onSelect: (id: string | null) => void;
-  onAddPulleyAt: (point: Point, span?: LineSegment) => void;
+  onAddPulleyAt: (point: Point, span?: LineSegment, beltId?: string) => void;
   onAddCoaxialPulley: (id: string) => void;
   onAction: (action: SketchAction) => void;
   onToolChange: (tool: SketchTool) => void;
   onUndo: () => void;
   onRedo: () => void;
+  onShortcuts: () => void;
   onFit: () => void;
   onReset: () => void;
   canUndo: boolean;
@@ -241,7 +243,7 @@ export default function SketchCanvas(props: SketchCanvasProps) {
     onToolChange,
     onUndo,
     onRedo,
-    onFit,
+    onShortcuts, onFit,
     onReset,
     canUndo,
     canRedo,
@@ -285,6 +287,7 @@ export default function SketchCanvas(props: SketchCanvasProps) {
   const [contextIdlerId, setContextIdlerId] = useState<string | null>(null);
   const [contextIdlerNameDraft, setContextIdlerNameDraft] = useState('');
   const [contextIdlerDiameterDraft, setContextIdlerDiameterDraft] = useState('');
+  const [snapSpan,setSnapSpan] = useState<LineSegment|null>(null);
   const [stackChoice, setStackChoice] = useState<PulleyStackChoice | null>(null);
   const [menuPart, setMenuPart] = useState<string | null>(null);
   const [gridMenuPosition, setGridMenuPosition] = useState<Point | null>(null);
@@ -473,9 +476,16 @@ export default function SketchCanvas(props: SketchCanvasProps) {
         ? geometry
         : calculateBeltGeometry(stageSketch);
       const idler = sketch.idlers.find(item => item.id === skipIdlerId);
-      const radius = (idler?.diameterMm ?? 0) * cameraRef.current.zoom / 2;
+      const pulley=sketch.pulleys.find(p=>p.id===skipIdlerId);
+      if(pulley && (pulley.profile!==belt.profile || sketch.transmission?.belts.some(b=>b.route.includes(pulley.id)) || hasOtherPulleyOnBeltAxle(sketch,pulley.id,belt.id))) continue;
+      const radius = (idler?.diameterMm ?? (pulley ? pitchDiameter(pulley.profile,pulley.toothCount) : 0)) * cameraRef.current.zoom / 2;
       const span = findBeltSpan(stageGeometry.segments, screen, cameraRef.current, size, radius + 12);
       if (!span) continue;
+      if (pulley) {
+        const route=insertRouteMember(stageSketch.route,span.fromId,span.toId,pulley.id);
+        if (!route || !calculateBeltGeometry({...stageSketch,route,pulleys:stageSketch.pulleys.map(p=>p.id===pulley.id?{...p,...worldAt(screen)}:p)}).valid) continue;
+      }
+      if (idler && !idlerIsLocked(sketch,idler) && !createTensionerOnSpan(stageSketch,span,worldAt(screen),idler.id,idler.tensionSide,idler.diameterMm)) continue;
       const start = worldToScreen(span.start, cameraRef.current, size);
       const end = worldToScreen(span.end, cameraRef.current, size);
       const dx = end.x - start.x;
@@ -568,7 +578,7 @@ export default function SketchCanvas(props: SketchCanvasProps) {
       ...(lockedBeltId ? { lockedBeltId } : {}),
       ...(stack.length > 1 ? { stackIds: stack.map(pulley => pulley.id), startClient: { x: event.clientX, y: event.clientY } } : {}),
     };
-    svgRef.current?.setPointerCapture(event.pointerId);
+    // Capture only once the pointer actually drags, preserving native double-click targets.
   };
 
   const showPulleyContextMenu = (id: string, x: number, y: number) => {
@@ -704,6 +714,7 @@ export default function SketchCanvas(props: SketchCanvasProps) {
   // The active tool resolves hits before lower SVG layers can consume the click.
   const onPointerDownCapture = (event: ReactPointerEvent<SVGSVGElement>) => {
     const screen = eventPoint(event, svgRef.current!);
+    if (event.ctrlKey && event.button === 0) { event.stopPropagation(); return; }
     if (event.button === 1 || (event.button === 0 && (spaceDown.current || tool === 'pan'))) {
       event.stopPropagation();
       event.preventDefault();
@@ -757,8 +768,8 @@ export default function SketchCanvas(props: SketchCanvasProps) {
     }
     if (tool === 'add-pulley') {
       event.stopPropagation();
-      const span = findBeltSpan(geometry.segments, screen, cameraRef.current, size);
-      onAddPulleyAt(worldAt(screen), span ?? undefined);
+      const target = nearestBeltSpanAt(screen);
+      onAddPulleyAt(worldAt(screen), target?.span, target?.beltId);
       return;
     }
     if (tool.startsWith('dimension-') || tool.startsWith('constraint-')) {
@@ -786,10 +797,12 @@ export default function SketchCanvas(props: SketchCanvasProps) {
       lastScreenPoint.current = screen;
     } else if (drag?.kind === 'drag') {
       if (!drag.started && Math.hypot(screen.x - drag.startScreen.x, screen.y - drag.startScreen.y) < 3) return;
-      if (!drag.started) { drag.started = true; onBeginDrag(drag.id); }
+      if (!drag.started) { drag.started = true; svgRef.current?.setPointerCapture(event.pointerId); onBeginDrag(drag.id); }
       onMoveObject(drag.id, { x: world.x + drag.offset.x, y: world.y + drag.offset.y });
-      if (sketch.idlers.some(idler => idler.id === drag.id)) {
+      const freePulley = sketch.pulleys.find(p=>p.id===drag.id) && !sketch.transmission?.belts.some(b=>b.route.includes(drag.id));
+      if (freePulley || sketch.idlers.some(idler => idler.id === drag.id)) {
         const target = nearestBeltSpanAt({ x: screen.x + drag.offset.x * cameraRef.current.zoom, y: screen.y - drag.offset.y * cameraRef.current.zoom }, drag.lockedBeltId, drag.id);
+        setSnapSpan(target?.span ?? null);
         if (target) {
           const index = (sketch.transmission?.belts.findIndex(belt => belt.id === target.beltId) ?? -1) + 1;
           onNotice(`Release to attach to Belt ${Math.max(1, index)}.`);
@@ -800,8 +813,15 @@ export default function SketchCanvas(props: SketchCanvasProps) {
 
   const finishPointer = (event: ReactPointerEvent<SVGSVGElement>) => {
     const drag = dragRef.current;
+    setSnapSpan(null);
     if (drag?.kind === 'drag' && drag.started) {
       const idler = sketch.idlers.find(item => item.id === drag.id);
+      if (!idler && event.type==='pointerup' && sketch.pulleys.some(p=>p.id===drag.id)) {
+        const p = sketch.pulleys.find(p=>p.id===drag.id)!;
+        const target = nearestBeltSpanAt(worldToScreen(p,cameraRef.current,size),undefined,p.id);
+        if(target) onAction({type:'LATCH_PULLEY',id:p.id,beltId:target.beltId,fromId:target.span.fromId,toId:target.span.toId});
+        onNotice(null);
+      }
       if (idler && event.type === 'pointerup') {
         const screen = eventPoint(event, svgRef.current!);
         const target = nearestBeltSpanAt({ x: screen.x + drag.offset.x * cameraRef.current.zoom, y: screen.y - drag.offset.y * cameraRef.current.zoom }, drag.lockedBeltId, drag.id);
@@ -816,6 +836,20 @@ export default function SketchCanvas(props: SketchCanvasProps) {
           }
           else onNotice(null);
         } else if (drag.lockedBeltId) {
+          const belt = sketch.transmission?.belts.find(b=>b.id===drag.lockedBeltId);
+          if (belt) {
+            const solved=calculateBeltGeometry(sketchForBeltStage(sketch,belt));
+            const contribution=solved.idlerContributions.find(i=>i.idlerId===idler.id);
+            const baseline=sketchForBeltStage(sketch,{...belt,route:removeIdlerFromBeltRoute(sketch,belt.route,idler.id)});
+            const span=calculateBeltGeometry(baseline).segments.find((s):s is LineSegment=>s.kind==='line' && s.fromId===route?.[index-1] && s.toId===route?.[index+1]);
+            let clear=false;
+            if(span){
+              const dx=span.end.x-span.start.x,dy=span.end.y-span.start.y;
+              const signed=(dx*(idler.y-span.start.y)-dy*(idler.x-span.start.x))/Math.hypot(dx,dy);
+              clear=signed*(-beltWinding(baseline))*(idler.tensionSide==='inside'?-1:1)>=idler.diameterMm/2;
+            }
+            if (clear || !solved.valid || (contribution && contribution.lengthMm<=1e-6)) onAction({type:'UNLATCH_IDLER',id:idler.id});
+          }
           onNotice(null);
         } else if (notice?.startsWith('Release to attach to Belt ')) onNotice(null);
       } else if (idler && (event.type === 'pointercancel' || event.type === 'lostpointercapture')) {
@@ -839,7 +873,7 @@ export default function SketchCanvas(props: SketchCanvasProps) {
       if (dragRef.current) return;
       const bounds = svg.getBoundingClientRect();
       const screen = { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
-      const camera = zoomViewAt(cameraRef.current, size, screen, Math.exp(-event.deltaY * 0.001));
+      const camera = zoomViewAt(cameraRef.current, size, screen, Math.exp(-Math.max(-120,Math.min(120,event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? size.height : 1))) * (event.ctrlKey ? 0.022 : 0.004)));
       cameraRef.current = camera;
       onViewChange(camera);
     };
@@ -1139,7 +1173,7 @@ export default function SketchCanvas(props: SketchCanvasProps) {
               className={`sketch-object ${ring}${isDriver ? ' driver' : ''}${latched ? ' latched' : ''}${selected ? ' selected' : ''}${routeMember ? ' route-member' : ''}${pending ? ' pair-pending' : ''}${centerHover ? ' center-hover' : ''}`}
               data-object-id={object.id}
               onPointerDown={(event) => onObjectPointerDown(event, object.id)}
-              onContextMenu={event => onObjectContextMenu(event, object.id)}
+              onDoubleClick={event=>onObjectContextMenu(event,object.id)} onContextMenu={event => onObjectContextMenu(event, object.id)}
               onKeyDown={event => onObjectKeyDown(event, object.id)}
               tabIndex={0}
               role="button"
@@ -1152,7 +1186,7 @@ export default function SketchCanvas(props: SketchCanvasProps) {
                   const r = radius * (1 + (i % 4 === 1 || i % 4 === 2 ? 2 : -2.5) / Math.max(4, object.toothCount));
                   return [center.x + r * Math.cos(angle), center.y + r * Math.sin(angle)].join(',');
                 }).join(' ')} />
-                <circle cx={center.x} cy={center.y} r={radius} fill="none" stroke={meshPreview && [meshPreview.gearAId, meshPreview.gearBId].includes(object.id) ? "#56e68d" : "#e77f89"} strokeDasharray="7 3 1 3" />
+                <circle cx={center.x} cy={center.y} r={radius} fill="none" className={meshPreview && [meshPreview.gearAId,meshPreview.gearBId].includes(object.id) ? "snap-glow" : ""} stroke={meshPreview && [meshPreview.gearAId, meshPreview.gearBId].includes(object.id) ? "#56e68d" : "#e77f89"} strokeDasharray="7 3 1 3" />
               </> : <circle cx={center.x} cy={center.y} r={Math.max(radius, 4)} className="object-body" />}
               <circle cx={center.x} cy={center.y} r={Math.max(radius * 0.58, 3)} className="object-inner" />
               {isDriver && <path d={`M ${center.x - 4} ${center.y - 2} L ${center.x + 4} ${center.y} L ${center.x - 4} ${center.y + 2} Z`} className="driver-mark" aria-hidden="true" />}
@@ -1208,6 +1242,7 @@ export default function SketchCanvas(props: SketchCanvasProps) {
           </g>;
         })}
         {sketch.dimensions.map((dimension) => renderDimension(dimension))}
+        {snapSpan && (()=>{const a=worldToScreen(snapSpan.start,cameraRef.current,size),b=worldToScreen(snapSpan.end,cameraRef.current,size);return <line className="snap-glow" x1={a.x} y1={a.y} x2={b.x} y2={b.y} pointerEvents="none"/>})()}
         {previewDimension && renderDimension(previewDimension, true)}
       </svg>
       {contextPulley && contextMenuPosition && <div
@@ -1225,6 +1260,7 @@ export default function SketchCanvas(props: SketchCanvasProps) {
           <strong>{contextPulley.label}</strong>
           <button type="button" aria-label="Close pulley options" onClick={() => setContextPulleyId(null)}><Icon name="close" size={15} /></button>
         </div>
+        <CatalogField sketch={sketch} id={contextPulley.id} onAction={onAction}/>
         <label className="pulley-context-field">
           <span>Name</span>
           <input aria-label="Context pulley name" value={contextNameDraft} autoFocus
@@ -1346,7 +1382,7 @@ export default function SketchCanvas(props: SketchCanvasProps) {
             }}
             aria-label={`${pulley.label}, ${pulley.id}, ${pulley.toothCount} teeth, ${pulley.profile}, ${belt?.id ?? 'No belt'}`}
             aria-pressed={selectedId === id} onClick={() => chooseStackMember(id)}>
-            {stackChoice.edit && <svg width="80" height="20" aria-hidden="true"><path d="M40 0v20" stroke="#888" strokeWidth="5"/><rect x={40 - Math.min(37, 8 + pulley.toothCount / 2)} y="5" width={2 * Math.min(37, 8 + pulley.toothCount / 2)} height="10" fill={gear ? '#ae7479' : '#83919e'}/></svg>}
+            {stackChoice.edit && <svg width="80" height="20" aria-hidden="true"><path d="M40 0v20" stroke="#888" strokeWidth="5"/><rect x={40 - Math.min(37, 8 + pulley.toothCount / 2)} y="5" width={2 * Math.min(37, 8 + pulley.toothCount / 2)} height="10" rx="2" fill={gear ? '#dc4b55' : '#83919e'}/>{Array.from({length:Math.min(15,Math.ceil(pulley.toothCount/3))},(_,i)=><path key={i} d={`M${40+(i/(Math.min(15,Math.ceil(pulley.toothCount/3))-1||1)-0.5)*Math.min(70,14+pulley.toothCount)} 5v10`} stroke="#303137" strokeWidth="2"/>)}</svg>}
             <span>{pulley.label}</span>
             <small>{pulley.label !== pulley.id ? `${pulley.id} · ` : ''}{pulley.toothCount}T · {pulley.profile} · {belt?.id ?? 'No belt'}</small>
           </button>;
@@ -1354,7 +1390,7 @@ export default function SketchCanvas(props: SketchCanvasProps) {
       </div>}
       {gridMenuPosition && menuPart && <div ref={gridMenuRef} className="pulley-context-menu" style={{left:gridMenuPosition.x,top:gridMenuPosition.y}}>
         <div className="pulley-context-heading"><strong>{sketch.transmission?.gears.find(g => g.id === menuPart)?.name ?? "Dimension"}</strong><button aria-label="Close options" onClick={() => setGridMenuPosition(null)}><Icon name="close" size={15}/></button></div>
-        {sketch.transmission?.gears.filter(g => g.id === menuPart).map(g => <div key={g.id} style={{display:"grid",gap:9}}><button className="pulley-context-action" onClick={() => {onToolChange("add-gear");setGridMenuPosition(null)}}>Place another gear</button><label className="pulley-context-field"><span>Name</span><input value={g.name} onChange={e => onAction({type:"SET_LABEL",id:g.id,label:e.target.value})}/></label><NumberField label="Gear module" unit="mm" value={g.moduleMm} min={Number.MIN_VALUE} onChange={moduleMm => onAction({type:"SET_GEAR_MODULE",id:g.id,moduleMm})}/><label className="pulley-context-field"><span>Teeth</span><input type="number" min="1" value={g.toothCount} onChange={e => onAction({type:"UPDATE_GEAR",id:g.id,toothCount:Number(e.target.value)})}/></label>{sketch.transmission?.meshes.some(m => m.gearAId === g.id || m.gearBId === g.id) && <button className="pulley-context-action" onClick={() => {onAction({type:"UNLOCK_GEAR",id:g.id});setGridMenuPosition(null)}}>Unlock gear</button>}{!isStacked(g.id) && <><button className="pulley-context-action" onClick={() => {onAddGear(g.id);setGridMenuPosition(null)}}>Add gear to axle</button><button className="pulley-context-action" onClick={() => {onAddCoaxialPulley(g.id);setGridMenuPosition(null)}}>Add pulley to axle</button></>}</div>)}
+        {sketch.transmission?.gears.filter(g => g.id === menuPart).map(g => <div key={g.id} style={{display:"grid",gap:9}}><NumberField label="Gear bore" unit="mm" value={g.boreMm} min={Number.MIN_VALUE} onChange={value=>onAction({type:"SET_GEAR_BORE",id:g.id,value})}/><CatalogField sketch={sketch} id={g.id} onAction={onAction}/><button className="pulley-context-action" onClick={() => {onToolChange("add-gear");setGridMenuPosition(null)}}>Place another gear</button><label className="pulley-context-field"><span>Name</span><input value={g.name} onChange={e => onAction({type:"SET_LABEL",id:g.id,label:e.target.value})}/></label><NumberField label="Gear module" unit="mm" value={g.moduleMm} min={Number.MIN_VALUE} onChange={moduleMm => onAction({type:"SET_GEAR_MODULE",id:g.id,moduleMm})}/><label className="pulley-context-field"><span>Teeth</span><input type="number" min="1" value={g.toothCount} onChange={e => onAction({type:"UPDATE_GEAR",id:g.id,toothCount:Number(e.target.value)})}/></label>{sketch.transmission?.meshes.some(m => m.gearAId === g.id || m.gearBId === g.id) && <button className="pulley-context-action" onClick={() => {onAction({type:"UNLOCK_GEAR",id:g.id});setGridMenuPosition(null)}}>Unlock gear</button>}{!isStacked(g.id) && <><button className="pulley-context-action" onClick={() => {onAddGear(g.id);setGridMenuPosition(null)}}>Add gear to axle</button><button className="pulley-context-action" onClick={() => {onAddCoaxialPulley(g.id);setGridMenuPosition(null)}}>Add pulley to axle</button></>}</div>)}
         <button className="pulley-context-action destructive" onClick={() => {onAction(sketch.dimensions.some(d => d.id === menuPart) ? {type:"REMOVE_DIMENSION",id:menuPart} : {type:"DELETE_OBJECT",id:menuPart});setGridMenuPosition(null)}}>Delete {sketch.dimensions.some(d => d.id === menuPart) ? "dimension" : "gear"}</button></div>}
       {gridMenuPosition && !menuPart && <div
         ref={gridMenuRef}
@@ -1369,10 +1405,10 @@ export default function SketchCanvas(props: SketchCanvasProps) {
         }}
       >
         <div className="pulley-context-heading">
-          <strong>Sketch tools</strong>
+          <strong>Sketch tools</strong><button onClick={()=>{setGridMenuPosition(null);onShortcuts()}}>Shortcuts</button>
           <button type="button" aria-label="Close tool menu" onClick={() => setGridMenuPosition(null)}><Icon name="close" size={15} /></button>
         </div>
-        <button className="grid-context-action" type="button" onClick={() => { onAddGear(); setGridMenuPosition(null); }}><span><Icon name="gear" size={16} /></span>Add gear</button>
+        <button className="grid-context-action" type="button" onClick={() => { onToolChange('add-gear'); setGridMenuPosition(null); }}><span><Icon name="gear" size={16} /></span>Add gear</button>
         {GRID_TOOL_GROUPS.map(group => <section className="grid-tool-group" key={group.title}>
           <h3>{group.title}</h3>
           <div>

@@ -10,10 +10,13 @@ import type {
   SketchConstraint,
   SketchDimension,
 } from './model';
-import { gearMeshCenterDistance, hasOtherPulleyOnBeltAxle, migrateLegacyTransmission, tangentGearPosition } from './transmission';
+import { calculateBeltGeometry } from './geometry';
+import { sketchForBeltStage, calculateTransmissionSpeeds, gearMeshCenterDistance, hasOtherPulleyOnBeltAxle, migrateLegacyTransmission, tangentGearPosition } from './transmission';
 import type { Gear } from './transmission';
 
 export type SketchAction =
+  | { type: "SET_GEAR_BORE"; id: string; value: number }
+  | { type: "SET_CATALOG_SKU"; id: string; sku: string }
   | { type: 'ADD_PULLEY'; pulley: Pulley; segment?: { fromId: string; toId: string } }
   | { type: 'ADD_COAXIAL_PULLEY'; pulley: Pulley; hostId: string }
   | { type: 'ADD_GEAR'; gear: Gear; x: number; y: number; hostId?: string }
@@ -27,6 +30,7 @@ export type SketchAction =
   | { type: 'UPDATE_PULLEY'; id: string; changes: Partial<Pick<Pulley, 'label' | 'toothCount' | 'profile'>> }
   | { type: 'UPDATE_IDLER'; id: string; changes: Partial<Pick<Idler, 'label' | 'diameterMm' | 'tensionSide'>> }
   | { type: 'SET_LABEL'; id: string; label: string }
+  | {type:'LATCH_PULLEY'; id:string; beltId:string; fromId:string; toId:string}
   | { type: 'MOVE_OBJECT'; id: string; x: number; y: number }
   | { type: 'BEGIN_DRAG'; id: string }
   | { type: 'REORDER_AXLE'; id: string; target: string }
@@ -285,6 +289,16 @@ function reducePresent(sketch: Sketch, action: Exclude<SketchAction, { type: 'UN
         meshes: tr.meshes.filter(mesh => mesh.gearAId !== gear.id && mesh.gearBId !== gear.id),
       } };
     }
+    case 'SET_GEAR_BORE': {
+      const tr = sketch.transmission;
+      if (!tr || !Number.isFinite(action.value) || action.value <= 0) return sketch;
+      return { ...sketch, transmission: { ...tr, gears: tr.gears.map(g => g.id === action.id ? { ...g, boreMm: action.value } : g) } };
+    }
+    case 'SET_CATALOG_SKU': {
+      const assign = <T extends {id: string}>(item: T) => item.id === action.id ? { ...item, catalogSku: action.sku } : item;
+      const tr = sketch.transmission;
+      return { ...sketch, pulleys: sketch.pulleys.map(assign), transmission: tr && { ...tr, gears: tr.gears.map(assign), belts: tr.belts.map(assign) } };
+    }
     case 'UPDATE_GEAR': {
       if (!Number.isInteger(action.toothCount) || action.toothCount <= 0) return sketch;
       const transmission = sketch.transmission;
@@ -336,6 +350,15 @@ function reducePresent(sketch: Sketch, action: Exclude<SketchAction, { type: 'UN
         tensionSide: action.idler.tensionSide ?? 'outside',
       };
       return { ...sketch, idlers: [...sketch.idlers, idler], route, ...(transmission ? { transmission } : {}) };
+    }
+    case 'LATCH_PULLEY': {
+      const tr = sketch.transmission;
+      const belt = tr?.belts.find(b=>b.id===action.beltId);
+      const pulley = sketch.pulleys.find(p=>p.id===action.id);
+      if (!tr || !belt || !pulley || belt.profile!==pulley.profile || tr.belts.some(b=>b.route.includes(action.id)) || hasOtherPulleyOnBeltAxle(sketch,action.id,belt.id)) return sketch;
+      const route = insertRouteMember(belt.route,action.fromId,action.toId,action.id);
+      if (!route || !calculateBeltGeometry(sketchForBeltStage(sketch,{...belt,route})).valid) return sketch;
+      return {...sketch,route:sketch.activeBeltId===belt.id?route:sketch.route,transmission:{...tr,belts:tr.belts.map(b=>b===belt?{...b,route}:b)}};
     }
     case 'LATCH_IDLER': {
       const idler = sketch.idlers.find(item => item.id === action.id);
@@ -400,7 +423,28 @@ function reducePresent(sketch: Sketch, action: Exclude<SketchAction, { type: 'UN
       const mate = mesh && tr?.gears.find(item => item.id === (mesh.gearAId === gear!.id ? mesh.gearBId : mesh.gearAId));
       const pivot = mate && tr?.axles.find(axle => axle.id === mate.axleId);
       let point = { x: action.x, y: action.y };
-      if (mesh && gear && mate && pivot && tr) {
+      const speeds = gear && tr && calculateTransmissionSpeeds(tr,gear.id,1).speeds;
+      const output = speeds && (sketch.drive?.outputId && sketch.drive.outputId in speeds ? sketch.drive.outputId :
+        [...sketch.pulleys,...tr!.gears].filter(p=>p.id in speeds).at(-1)?.id);
+      if (gear && output === gear.id && tr) {
+        const members = new Set([gear.id]);
+        const links = [...tr.axles.map(a=>a.componentIds), ...tr.meshes.map(m=>[m.gearAId,m.gearBId]),
+          ...sketch.constraints.map(c=>[c.firstId,c.secondId]), ...sketch.dimensions.flatMap(d=>d.toId?[[d.fromId,d.toId]]:[])];
+        let previous = 0;
+        while (previous !== members.size) {
+          previous = members.size;
+          for (const ids of links) if (ids.some(id=>members.has(id))) ids.forEach(id=>members.add(id));
+        }
+        for (const id of members) {
+          const before = findObject(sketch,id);
+          if (!before) continue;
+          // Process a shared shaft once; replacePosition moves all its members.
+          const axle = tr.axles.find(a=>a.componentIds.includes(id));
+          if (axle && axle.componentIds[0] !== id) continue;
+          sketch = replacePosition(sketch,id,{x:before.x+point.x-current.x,y:before.y+point.y-current.y});
+        }
+      }
+      if (mesh && gear && mate && pivot && tr && output !== gear.id) {
         const direction = { x: point.x - pivot.x, y: point.y - pivot.y };
         if (!direction.x && !direction.y) return sketch;
         point = tangentGearPosition(pivot, direction, mate, gear);
@@ -687,7 +731,7 @@ export function reduceSketch(state: HistoryState, action: SketchAction): History
   let present = reducePresent(state.present, action);
   if (present && (present.transmission || action.type === 'ROUTE_CLICK' || action.type === 'CLEAR_ROUTE' || action.type === 'SET_PROFILE' || action.type === 'SET_BELT_PROFILE')) present = syncActiveBelt(present);
   if (present === null) return { ...state, notice: 'That edit conflicts with existing dimensions or constraints.' };
-  if (state.activeEdit && action.type === 'LATCH_IDLER' && state.activeEdit.id === action.id) {
+  if (state.activeEdit && (action.type === 'LATCH_IDLER' || action.type === 'LATCH_PULLEY' || action.type === 'UNLATCH_IDLER') && state.activeEdit.id === action.id) {
     return finishActiveEdit({ ...state, present });
   }
   if (present === state.present || sameSketch(present, state.present)) return state;

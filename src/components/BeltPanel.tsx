@@ -45,6 +45,7 @@ export default function BeltPanel({ sketch, geometry, onAction }: BeltPanelProps
       <span>Belt profile</span>
       <select value={sketch.profile} onChange={(event) => onAction({ type: 'SET_BELT_PROFILE', profile: event.target.value as Sketch['profile'] })}>
         <option value="GT2">GT2 · 2 mm pitch</option>
+        <option value="GT2 3mm">GT2 · 3 mm pitch</option>
         <option value="GT3">GT3 · 3 mm pitch</option>
         <option value="HTD 5M">HTD 5M · 5 mm pitch</option>
       </select>

@@ -5,7 +5,7 @@ import { migrateLegacyTransmission } from './transmission';
 export const STORAGE_KEY = 'belt-pulley-calculator.sketch.v1';
 
 type SketchStorage = Pick<Storage, 'getItem' | 'setItem'>;
-const profiles = new Set<BeltProfile>(['GT2', 'GT3', 'HTD 5M']);
+const profiles = new Set<BeltProfile>(['GT2', 'GT2 3mm', 'GT3', 'HTD 5M']);
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

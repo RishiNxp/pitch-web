@@ -44,8 +44,10 @@ describe('sketch state', () => {
     expect(mateAxle?.y).toBeCloseTo(39.2);
     const moved = reduceSketch(added, { type: 'MOVE_OBJECT', id: 'G2', x: 15, y: 40 });
     const orbit = moved.present.transmission!.axles.find(axle => axle.id === 'AX-G2')!;
-    expect(orbit.x).toBeGreaterThan(10);
-    expect(Math.hypot(orbit.x - 10, orbit.y - 20)).toBeCloseTo(19.2);
+    expect(orbit).toMatchObject({x:15,y:40});
+    const follower = moved.present.transmission!.axles.find(a=>a.componentIds.includes('G1'))!;
+    expect(follower.x).toBeCloseTo(15);
+    expect(follower.y).toBeCloseTo(20.8);
     const resized = reduceSketch(added, { type: 'UPDATE_GEAR', id: 'G2', toothCount: 48 });
     const resizedAxle = resized.present.transmission?.axles.find(axle => axle.id === 'AX-G2');
     expect(Math.hypot(resizedAxle!.x - 10, resizedAxle!.y - 20)).toBeCloseTo(28.8);

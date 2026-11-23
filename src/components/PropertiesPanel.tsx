@@ -70,7 +70,7 @@ export default function PropertiesPanel({ sketch, selectedId, onAction, onDelete
         <option value="">No belt</option>
         {(sketch.transmission?.belts ?? []).map((belt, index) => <option key={belt.id} value={belt.id} disabled={hasOtherPulleyOnBeltAxle(sketch, pulley.id, belt.id)}>Belt {index + 1} · {belt.profile}</option>)}
       </select></label>
-      {sketch.route.includes(pulley.id) && <label className="property-field"><span>Active belt profile</span><select aria-label="Active belt profile" value={sketch.profile} onChange={event => onAction({ type: 'SET_BELT_PROFILE', profile: event.target.value as Sketch['profile'] })}><option>GT2</option><option>GT3</option><option>HTD 5M</option></select></label>}
+      {sketch.route.includes(pulley.id) && <label className="property-field"><span>Active belt profile</span><select aria-label="Active belt profile" value={sketch.profile} onChange={event => onAction({ type: 'SET_BELT_PROFILE', profile: event.target.value as Sketch['profile'] })}><option>GT2</option><option>GT2 3mm</option><option>GT3</option><option>HTD 5M</option></select></label>}
       <button className="inspector-action" type="button" onClick={() => onAddCoaxialPulley(pulley.id)}><Icon name="plus" size={15} />Add pulley to this axle</button>
       <button className="inspector-action" type="button" onClick={() => onStartAxleStage(pulley.id)}><Icon name="belt" size={15} />Start a belt from this axle</button>
       <button className="inspector-action" type="button" onClick={() => {
@@ -111,7 +111,7 @@ export default function PropertiesPanel({ sketch, selectedId, onAction, onDelete
     </div>}
     {gear && <div key={gear.id}>
       <div className="selection-heading"><span className="selection-marker pulley-marker"><Icon name="gear" size={18} /></span><div><b>{gear.name}</b><small>MOD {gear.moduleMm} · {gear.pressureAngleDeg}°</small></div></div>
-      <div className="calculation-values"><div><span>Teeth</span><b>{gear.toothCount}T</b></div><div><span>Pitch diameter</span><b>{(gear.moduleMm * gear.toothCount).toFixed(2)} mm</b></div><div><span>Bore</span><b>{gear.boreMm} mm REX</b></div><div><span>Axle</span><b>{gear.axleId}</b></div></div>
+      <div className="calculation-values"><div><span>Teeth</span><b>{gear.toothCount}T</b></div><div><span>Pitch diameter</span><b>{(gear.moduleMm * gear.toothCount).toFixed(2)} mm</b></div><div><span>Bore</span><b>{gear.boreMm} mm</b></div><div><span>Axle</span><b>{gear.axleId}</b></div></div>
       <NumberField label="Gear module" unit="mm" value={gear.moduleMm} min={Number.MIN_VALUE} onChange={moduleMm => onAction({type:"SET_GEAR_MODULE", id:gear.id, moduleMm})} />
       <label className="property-field"><span>Tooth count</span><input aria-label="Gear tooth count" type="number" min="1" step="1" value={gear.toothCount} onChange={event => onAction({ type: 'UPDATE_GEAR', id: gear.id, toothCount: Number(event.target.value) })} /></label>
       <p>Drag this gear near another gear and release to mesh their pitch circles.</p>

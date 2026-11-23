@@ -1,8 +1,9 @@
 import type { BeltProfile, Point, Sketch } from './model';
 
 export type Axle = { id: string; x: number; y: number; componentIds: string[] };
-export type BeltStage = { id: string; profile: BeltProfile; route: string[]; toothCounts: Record<string, number>; pulleyProfiles?: Record<string, BeltProfile> };
+export type BeltStage = { catalogSku?: string; id: string; profile: BeltProfile; route: string[]; toothCounts: Record<string, number>; pulleyProfiles?: Record<string, BeltProfile> };
 export type Gear = {
+  catalogSku?: string;
   id: string; name: string; axleId: string; plane: number;
   toothCount: number; moduleMm: number; pressureAngleDeg: number; boreMm: number;
 };
