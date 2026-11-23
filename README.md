@@ -1,29 +1,38 @@
 # Pitch
 
-Pitch is a desktop-sized robotics drivetrain editor. Build gear trains, belt drives, and compound mechanisms on a shared XY canvas. Dimension shaft centers, mesh compatible gears, route belts through tensioners, and compare speed and direction between components in each independent train.
+Pitch is a robotics drivetrain layout tool for gears, belts, pulleys, and axles.
 
-## Run locally
+## Open the website
 
-Use Node.js 22.12 or newer and npm.
+Visit [Pitch on GitHub Pages](https://rishinxp.github.io/pitch-web/).
+
+## Download the desktop app
+
+- [Windows x64](https://github.com/RishiNxp/pitch-desktop/releases/latest/download/Pitch-Windows-x64.zip). Extract the ZIP, open its **Pitch** folder, and run **Pitch.exe**.
+- [macOS downloads](https://github.com/RishiNxp/pitch-mac/releases). Choose **arm64** for Apple Silicon or **x64** for Intel, extract the ZIP, and move **Pitch.app** to Applications.
+
+The latest public Mac build is v1.0.0. It is ad hoc signed and not notarized, so it does not pass Apple's normal Gatekeeper checks. A signed, notarized release will be posted on the Mac releases page after Apple developer credentials are configured.
+
+## Develop and publish website changes
+
+Use Node.js 22.12 or newer and npm:
 
 ~~~sh
+git clone https://github.com/RishiNxp/pitch-web.git
+cd pitch-web
 npm ci
-npm run dev
+npm test
+npm run build
 ~~~
 
-Run the logic suite with `npm test`. Run `npm run build` for the TypeScript check and optimized static site. Use `npm run preview` to inspect that build locally.
+Push website changes to **main** to trigger the GitHub Pages deployment:
 
-## Deploy on Vercel
+~~~sh
+git add -A
+git commit -m "Describe the website update"
+git push origin main
+~~~
 
-Import this repository as a Vite project. Use the repository root, the build command `npm run build`, and output directory `dist`. No environment variables or backend are required.
+You need write access to the repository to push to it. Otherwise, fork it, push your branch to your fork, and open a pull request.
 
-## Using Pitch
-
-- Place a pulley or gear from the toolbar. Drag compatible gears together until both pitch circles turn green, then release to mesh.
-- Right-click an axle to add a component. Drag rows in the stack picker to change their physical order.
-- Choose Create belt, select the pulleys, and press Enter. Select a belt to inspect its tooth count and members.
-- Place a tensioner and drag it to a belt span. Right-click to adjust or detach it.
-- Use More tools to dimension or align centers. In Drive ratio, choose the train, driver, and driven output.
-- Refresh restores the current layout in the same browser. Code updates start a fresh session. Use Save file to keep a portable JSON copy.
-
-Pitch models planar layout and ideal speed ratios. It does not model load capacity, backlash, or material strength.
+The Vite output directory is **dist**. The site has no backend or required environment variables.
