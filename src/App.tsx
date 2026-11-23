@@ -418,7 +418,7 @@ export default function App() {
     }}>
       <header className="topbar">
         <button className="brand" aria-label="Return to Pitch home" onClick={()=>setPage("welcome")}>
-          <div className="brand-mark"><img className="pitch-logo" src="/pitch-logo.png" alt="" /></div>
+          <div className="brand-mark"><img className="pitch-logo" src="./pitch-logo.png" alt="" /></div>
           <div className="brand-name"><b>Pitch</b><small>ROBOTICS DRIVE LAYOUT</small></div>
         </button>
         <div className="topbar-spacer" />

@@ -162,6 +162,6 @@ export default function ChromeSculpture() {
     restart();motion.addEventListener('change',restart);document.addEventListener('visibilitychange',restart);window.addEventListener('resize',restart);
     return ()=>{window.removeEventListener('blur',reset);stage.removeEventListener('pointermove',track);stage.removeEventListener('pointerleave',reset);cancelAnimationFrame(frame);motion.removeEventListener('change',restart);document.removeEventListener('visibilitychange',restart);window.removeEventListener('resize',restart);gl.deleteBuffer(buffer);gl.deleteProgram(program);};
   },[]);
-  return <div className="chrome-traveler" aria-hidden="true"><canvas ref={ref}/><img src="/pitch-logo.png" alt=""/></div>;
+  return <div className="chrome-traveler" aria-hidden="true"><canvas ref={ref}/><img src="./pitch-logo.png" alt=""/></div>;
 }
 
