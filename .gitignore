@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+artifacts/
+.superpowers/
+.desktop-app/
+*.log
+# Playwright CLI output (may contain credentials)
+.playwright-cli/
+
+.codex/
+.agents/
