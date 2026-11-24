@@ -1,3 +1,4 @@
+import {launchFlight} from '../chromeFlight';
 import { useEffect, useRef } from 'react';
 
 const fragment = `
@@ -134,8 +135,8 @@ export default function ChromeSculpture() {
         const x=xRange*.60;
         const y=.28;
         gl.viewport(0,0,w,h);gl.uniform2f(size,w,h);gl.uniform1f(time,elapsed);gl.uniform1f(logo,pose);
-        const positions=[mix(xRange*Math.cos(elapsed*.22+.62),x-.26),mix(.97*Math.sin(elapsed*.26),y-.26),
-          mix(xRange*Math.cos(elapsed*.22-.59),x+.28),mix(.88*Math.cos(elapsed*.28+.6),y+.29)];
+        const [ax,ay,bx,by]=launchFlight(elapsed,xRange);
+        const positions=[mix(ax,x-.26),mix(ay,y-.26),mix(bx,x+.28),mix(by,y+.29)];
         const free=elapsed<5.5?0:1-pose;
         const mouseX=target.x*2.4*w/Math.min(w,h);
         const mouseY=target.y*2.4*h/Math.min(w,h);

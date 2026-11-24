@@ -35,7 +35,7 @@ const guideTopics = [
   ['Position a tensioner', 'Place a tensioner on the grid, then drag it to the belt span you want and release. Right-click to change its diameter or inside/outside tension. Unlock and detach it before dragging it onto another belt.'],
   ['Mesh and orbit gears', 'Place two gears on separate axles. Set matching modules, then drag one toward the other. Release when both pitch circles turn green. Drag either gear to orbit its mate. Right-click to unlock. Changing a meshed gear’s module releases its connections.'],
   ['Set a dimension', 'In More tools, choose horizontal, vertical, or center distance. Click two centers and click again to place the measurement. Double-click its value, type a distance, and press Enter. Right-click the dimension to delete it.'],
-  ['Compare a drive train', 'In Drive ratio, choose the train, driving component, and driven output. Read the ratio and rotation direction, or enter driver RPM for output speed. Separate trains work independently of the origin.'],
+  ['Compare a drive train', 'Open Drivetrain · RPM and motion below the canvas. Choose the train, driving component, and driven output. Read the ratio and rotation direction, or enter driver RPM for output speed. Separate trains work independently of the origin.'],
   ['Navigate and save', 'Use Home to fit the whole layout. Right-click the grid for tools and Undo. Refresh restores your layout in this browser. Save file keeps a copy you can open later. Clear plane starts an empty layout.'],
 ];
 function layoutGuidance(sketch: Sketch, routeClosed: boolean, tool: SketchTool, geometry: BeltGeometryResult): {
@@ -55,7 +55,7 @@ function layoutGuidance(sketch: Sketch, routeClosed: boolean, tool: SketchTool, 
   if (routeClosed && geometry.valid) {
     return {
       title: 'Layout ready',
-      body: 'Belt size and drive results update in the properties panel.',
+      body: 'Read belt size in the sidebar and drive results in the board below the canvas.',
       action: null,
       actionLabel: null,
     };
@@ -118,12 +118,18 @@ declare const __PITCH_REVISION__: string;
 function restoreLayout(): Sketch | null {
   try {
     const saved = JSON.parse(localStorage.getItem('pitch.session') ?? 'null');
-    return saved?.revision === __PITCH_REVISION__ ? parseSketchJson(JSON.stringify(saved.sketch)) : null;
+    if (!saved?.sketch) return null;
+    const restored = parseSketchJson(JSON.stringify(saved.sketch));
+    if (saved.revision !== __PITCH_REVISION__) {
+      try { localStorage.setItem('pitch.session.beforeUpgrade', JSON.stringify(saved)); } catch { /* A full store still permits read-only recovery. */ }
+    }
+    return restored;
   } catch { return null; }
 }
 
 export default function App() {
   const [settings,setSettings] = useState(false);
+  const [motion,setMotion]=useState<Record<string,number>>({});
   const [collapsed,setCollapsed] = useState(false);
   const [light,setLight] = useState(()=>localStorage.getItem('pitch.theme')==='light');
   const [binds,setBinds] = useState<Bindings>(()=>{try{return {...defaults,...JSON.parse(localStorage.getItem('pitch.keys')||'{}')}}catch{return defaults}});
@@ -134,7 +140,7 @@ export default function App() {
     past: [], present: restored ?? createEmptySketch(), future: [], activeEdit: null,
   }));
   const sketch = history.present;
-  const [page, setPage] = useState<'welcome' | 'calculator'>(restored ? 'calculator' : 'welcome');
+  const [page, setPage] = useState<'welcome' | 'calculator'>(restored && location.protocol !== 'belt-pulley:' ? 'calculator' : 'welcome');
   useEffect(() => {
     if (page !== 'calculator') return;
     try { localStorage.setItem('pitch.session', JSON.stringify({ revision: __PITCH_REVISION__, sketch })); }
@@ -307,7 +313,7 @@ export default function App() {
   const enterCalculator = () => {
     setEntering(!window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     setGuidePage(0);
-    setShowTips(true);
+    setShowTips(!hasSketchContent(sketch));
     setPage('calculator');
   };
 
@@ -465,14 +471,14 @@ export default function App() {
             } else if (action.type === 'ADD_BELT_STAGE') setTool('route');
           }} />
           <OrderPanel sketch={sketch} onAction={dispatch} />
-          <DrivePanel sketch={sketch} geometry={geometry} onAction={dispatch} />
+
         </aside>
         <section className="center-workspace" aria-label="Sketch canvas">
           <div className="workspace-subbar"><button aria-label={collapsed?"Show properties":"Hide properties"} aria-expanded={!collapsed} onClick={()=>setCollapsed(!collapsed)}>{collapsed?"+":"−"}</button>
             <span className="view-chip">2D SKETCH</span><span className="subbar-divider" /><span className="subbar-value">XY PLANE</span>
             <div className={`workspace-status${routeClosed && !geometry.valid ? ' invalid' : ''}`}><i />{routeClosed ? geometry.valid ? 'BELT ROUTE CLOSED' : 'INVALID BELT GEOMETRY' : 'SKETCH EDITING'}</div>
           </div>
-          <SketchCanvas onShortcuts={()=>setSettings(true)}
+          <SketchCanvas motion={motion} onShortcuts={()=>setSettings(true)}
             sketch={sketch}
             geometry={geometry}
             selectedId={selectedId}
@@ -522,6 +528,10 @@ export default function App() {
               <button className="guide-dismiss" type="button" onClick={toggleTips}>{guidePage === guideTopics.length ? "Done" : "Skip tips"}</button>
             </div>
           </section>}
+          <details className="rpm-board">
+            <summary>Drivetrain · RPM and motion</summary>
+          <DrivePanel onMotion={setMotion} sketch={sketch} geometry={geometry} onAction={dispatch} />
+          </details>
         </section>
       </main>
     </div>}

@@ -31,6 +31,7 @@ export type SketchAction =
   | { type: 'UPDATE_IDLER'; id: string; changes: Partial<Pick<Idler, 'label' | 'diameterMm' | 'tensionSide'>> }
   | { type: 'SET_LABEL'; id: string; label: string }
   | {type:'LATCH_PULLEY'; id:string; beltId:string; fromId:string; toId:string}
+  | { type: 'FIT_BELT'; id:string; x:number; y:number; beltId:string; sku:string }
   | { type: 'MOVE_OBJECT'; id: string; x: number; y: number }
   | { type: 'BEGIN_DRAG'; id: string }
   | { type: 'REORDER_AXLE'; id: string; target: string }
@@ -189,15 +190,16 @@ function recordChange(state: HistoryState, present: Sketch): HistoryState {
 }
 
 function syncActiveBelt(sketch: Sketch): Sketch {
-  const transmission = sketch.transmission ?? migrateLegacyTransmission(sketch);
+  const base = sketch.transmission ?? migrateLegacyTransmission(sketch);
+  const counts = Object.fromEntries(sketch.pulleys.map(p => [p.id, p.toothCount]));
+  const transmission = { ...base, belts: base.belts.map(belt => ({ ...belt, toothCounts: counts })) };
   if (sketch.activeBeltId === null) return { ...sketch, transmission };
   const active = transmission.belts.find(belt => belt.id === sketch.activeBeltId) ?? transmission.belts[0];
   const belts = [...transmission.belts];
   if (active) {
     const index = belts.findIndex(belt => belt.id === active.id);
     const counts = Object.fromEntries(sketch.pulleys.map(p => [p.id, p.toothCount]));
-    const pulleyProfiles = { ...(active.pulleyProfiles ?? {}) };
-    for (const id of active.route) if (sketch.pulleys.some(p => p.id === id)) pulleyProfiles[id] = active.profile;
+    const pulleyProfiles = Object.fromEntries(sketch.pulleys.filter(p => sketch.route.includes(p.id)).map(p => [p.id, sketch.profile]));
     belts[index] = { ...active, route: [...sketch.route], profile: sketch.profile, toothCounts: counts, pulleyProfiles };
     return { ...sketch, transmission: { ...transmission, belts }, activeBeltId: active.id };
   }
@@ -414,6 +416,11 @@ function reducePresent(sketch: Sketch, action: Exclude<SketchAction, { type: 'UN
         ...sketch,
         idlers: sketch.idlers.map((item) => item.id === action.id ? { ...item, ...action.changes } : item),
       };
+    case 'FIT_BELT': {
+      if (sketch.activeBeltId !== action.beltId) return sketch;
+      const moved=reducePresent(sketch,{...action,type:'MOVE_OBJECT'});
+      return moved && reducePresent(moved,{type:'SET_CATALOG_SKU',id:action.beltId,sku:action.sku});
+    }
     case 'MOVE_OBJECT': {
       const current = findObject(sketch, action.id);
       if (!current || current.isOrigin || !Number.isFinite(action.x) || !Number.isFinite(action.y)) return sketch;
@@ -642,6 +649,7 @@ function reducePresent(sketch: Sketch, action: Exclude<SketchAction, { type: 'UN
       const routes = sketch.transmission?.belts.map(belt => belt.route) ?? [sketch.route];
       const connected = (id: string | null | undefined) => id && (sketch.transmission?.gears.some(g => g.id === id) || sketch.pulleys.some(p => p.id === id) && (routes.some(route => route.includes(id)) || sketch.transmission?.axles.some(a => a.componentIds.includes(id) && a.componentIds.length > 1))) ? id : null;
       const drive = {
+        ...sketch.drive,
         driverRpm: sketch.drive?.driverRpm ?? null,
         driverId: connected(sketch.drive?.driverId), outputId: connected(sketch.drive?.outputId),
         ...action.changes,

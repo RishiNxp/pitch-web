@@ -53,6 +53,7 @@ const GRID_TOOL_GROUPS: Array<{ title: string; tools: Array<{ tool: SketchTool; 
 ];
 
 type SketchCanvasProps = {
+  motion: Record<string,number>;
   sketch: Sketch;
   geometry: BeltGeometryResult;
   selectedId: string | null;
@@ -1243,6 +1244,16 @@ export default function SketchCanvas(props: SketchCanvasProps) {
         })}
         {sketch.dimensions.map((dimension) => renderDimension(dimension))}
         {snapSpan && (()=>{const a=worldToScreen(snapSpan.start,cameraRef.current,size),b=worldToScreen(snapSpan.end,cameraRef.current,size);return <line className="snap-glow" x1={a.x} y1={a.y} x2={b.x} y2={b.y} pointerEvents="none"/>})()}
+        {screenObjects.map(object=>{
+          const rpm=props.motion[object.id];
+          if (!rpm) return null;
+          const fastest=Math.max(60,...Object.values(props.motion).map(Math.abs));
+          return <g key={object.id} pointerEvents="none" transform={`translate(${object.center.x} ${object.center.y})`}>
+            <g style={{animation:`pitch-spin ${fastest/Math.abs(rpm)}s linear infinite ${rpm<0?'reverse':'normal'}`}}>
+              <circle cx={object.radius*.7} cy="0" r="3" fill="#ffd166" stroke="#241e18"/>
+            </g>
+          </g>;
+        })}
         {previewDimension && renderDimension(previewDimension, true)}
       </svg>
       {contextPulley && contextMenuPosition && <div

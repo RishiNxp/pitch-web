@@ -68,7 +68,7 @@ export type Sketch = {
   constraints: SketchConstraint[];
   toleranceTeeth: number;
   availableBeltTeeth: number[];
-  drive?: { driverId: string | null; outputId: string | null; driverRpm: number | null };
+  drive?: { torque?: string; efficiency?: string; diameter?: string; motor?: string; driverId: string | null; outputId: string | null; driverRpm: number | null };
   view: { centerX: number; centerY: number; zoom: number };
 };
 

@@ -57,7 +57,7 @@ function requireDesign(value: unknown): Sketch {
     if (objectIds.has(pulley.id)) throw new Error(`Sketch object ${pulley.id} appears more than once.`);
     objectIds.add(pulley.id);
   }
-  if (sketch.pulleys.length > 0) {
+  if (sketch.pulleys.some(p => p.isOrigin) || (sketch.pulleys.length > 0 && !sketch.transmission)) {
     const origins = sketch.pulleys.filter((pulley) => pulley.isOrigin);
     if (origins.length !== 1 || sketch.pulleys[0] !== origins[0] || origins[0]!.x !== 0 || origins[0]!.y !== 0) {
       throw new Error('The first pulley must be the sketch origin at X 0 and Y 0.');
@@ -88,7 +88,7 @@ function requireDesign(value: unknown): Sketch {
   if (new Set(routeWithoutClose).size !== routeWithoutClose.length) {
     throw new Error('Belt route visits a component more than once.');
   }
-  if (sketch.route.length > 0 && sketch.route[0] === sketch.route.at(-1) && sketch.route.length < 3) {
+  if (sketch.route.length > 1 && sketch.route[0] === sketch.route.at(-1) && sketch.route.length < 3) {
     throw new Error('A closed route needs at least two distinct objects.');
   }
 
@@ -126,8 +126,8 @@ function requireDesign(value: unknown): Sketch {
   const settings: Record<string, unknown> = isObject(sketch.drive) ? sketch.drive : {};
   const pulleyIds = new Set(sketch.pulleys.map(pulley => pulley.id));
   const transmission = sketch.transmission ?? migrateLegacyTransmission(sketch);
-  const allRoutes = transmission.belts.map(belt => belt.route);
-  const driveId = (id: unknown) => typeof id === 'string' && (transmission.gears.some(g => g.id === id) || pulleyIds.has(id) && (allRoutes.some(route => route.includes(id)) || transmission.axles.some(a => a.componentIds.includes(id) && a.componentIds.length > 1))) ? id : null;
+  if (![transmission.belts, transmission.axles, transmission.gears, transmission.meshes].every(Array.isArray)) throw new Error('Invalid transmission lists.');
+  const driveId = (id: unknown) => typeof id === 'string' && (transmission.gears.some(g => g.id === id) || pulleyIds.has(id) && (transmission.belts.some(belt => belt.route.includes(id)) || transmission.axles.some(a => a.componentIds.includes(id) && a.componentIds.length > 1))) ? id : null;
   const beltIds = new Set<string>();
   for (const belt of transmission.belts) {
     if (!isObject(belt) || typeof belt.id !== 'string' || !belt.id || beltIds.has(belt.id)
@@ -137,9 +137,11 @@ function requireDesign(value: unknown): Sketch {
     if (Object.values(belt.toothCounts).some(teeth => !Number.isInteger(teeth) || (teeth as number) <= 0)) throw new Error(`Belt ${belt.id} has invalid tooth counts.`);
     if (belt.pulleyProfiles !== undefined && (!isObject(belt.pulleyProfiles) || Object.entries(belt.pulleyProfiles).some(([id, profile]) => !belt.route.includes(id) || !profiles.has(profile as BeltProfile)))) throw new Error(`Belt ${belt.id} has invalid pulley profiles.`);
   }
+  const currentTeeth = Object.fromEntries(sketch.pulleys.map(p => [p.id, p.toothCount]));
+  transmission.belts = transmission.belts.map(belt => ({ ...belt, toothCounts: currentTeeth }));
   const gearIds = new Set<string>();
   for (const gear of transmission.gears) {
-    if (!isObject(gear) || typeof gear.id !== 'string' || !gear.id.trim() || gearIds.has(gear.id)
+    if (!isObject(gear) || typeof gear.id !== 'string' || !gear.id.trim() || objectIds.has(gear.id) || gearIds.has(gear.id)
       || typeof gear.name !== 'string' || !Number.isInteger(gear.toothCount) || gear.toothCount <= 0
       || !isFiniteNumber(gear.moduleMm) || gear.moduleMm <= 0 || !isFiniteNumber(gear.pressureAngleDeg)
       || !isFiniteNumber(gear.boreMm) || gear.boreMm <= 0 || !Number.isInteger(gear.plane)
@@ -175,6 +177,7 @@ function requireDesign(value: unknown): Sketch {
     return { ...idler, beltId, locked: idler.locked ?? beltId !== null, tensionSide: idler.tensionSide ?? 'outside' };
   });
   return { ...sketch, idlers, transmission, activeBeltId, ...(activeBelt ? { route: [...activeBelt.route], profile: activeBelt.profile } : activeBeltId === null ? { route: [] } : {}), drive: {
+    ...Object.fromEntries(['torque','efficiency','diameter','motor'].filter(key => typeof settings[key] === 'string').map(key => [key, settings[key]])),
     driverId: driveId(settings.driverId),
     outputId: driveId(settings.outputId),
     driverRpm: isFiniteNumber(settings.driverRpm) && settings.driverRpm >= 0 ? settings.driverRpm : null,

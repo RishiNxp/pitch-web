@@ -83,3 +83,15 @@ describe('sketch persistence', () => {
     expect(loadSketch(storage).transmission).toEqual(sketch.transmission);
   });
 });
+it('restores an unfinished one-pulley route, current pulley teeth and drive assumptions', () => {
+  const sketch = createDemoSketch();
+  sketch.route = ['P1'];
+  const belt = sketch.transmission!.belts[0]!;
+  belt.route = ['P1'];
+  belt.toothCounts.P1 = 16;
+  sketch.drive = { driverId: null, outputId: null, driverRpm: 120, diameter: '96', efficiency: '85', torque: '0.8' };
+  const loaded = parseSketchJson(JSON.stringify(sketch));
+  expect(loaded.route).toEqual(['P1']);
+  expect(loaded.drive).toEqual(sketch.drive);
+  expect(loaded.transmission!.belts[0]!.toothCounts.P1).toBe(sketch.pulleys[0]!.toothCount);
+});

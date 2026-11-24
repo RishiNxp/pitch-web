@@ -1,3 +1,4 @@
+import FitBelt from './FitBelt';
 import { useEffect, useState } from 'react';
 import type { BeltGeometryResult, Sketch } from '../model';
 import type { SketchAction } from '../state';
@@ -5,6 +6,7 @@ import type { SketchAction } from '../state';
 type BeltPanelProps = { sketch: Sketch; geometry: BeltGeometryResult; onAction: (action: SketchAction) => void };
 
 export default function BeltPanel({ sketch, geometry, onAction }: BeltPanelProps) {
+  const teeth = geometry.nearestTeeth;
   const [toleranceDraft, setToleranceDraft] = useState(String(sketch.toleranceTeeth));
   useEffect(() => setToleranceDraft(String(sketch.toleranceTeeth)), [sketch.toleranceTeeth]);
 
@@ -54,8 +56,8 @@ export default function BeltPanel({ sketch, geometry, onAction }: BeltPanelProps
     {geometry.valid && hasActiveBelt ? <>
       <div className={`belt-size-result ${geometry.passesTolerance ? 'pass' : 'fail'}`}>
         <span className="eyebrow">NEAREST WHOLE TOOTH COUNT</span>
-        <strong>{geometry.nearestTeeth}<small>T</small></strong>
-        <div className="nominal-belt-length">Nominal length <b>{(geometry.nearestTeeth! * geometry.pitchMm).toFixed(2)} mm</b></div>
+        <strong>{teeth ?? '—'}<small>T</small></strong>
+        <div className="nominal-belt-length">Nominal length <b>{teeth == null ? '—' : (teeth * geometry.pitchMm).toFixed(2)} mm</b></div>
       </div>
       <div className={`tolerance-status ${geometry.passesTolerance ? 'pass' : 'fail'}`}>
         <span className="tolerance-led" />
@@ -79,5 +81,6 @@ export default function BeltPanel({ sketch, geometry, onAction }: BeltPanelProps
         aria-label="Tooth tolerance"
       />T</span>
     </label>}
+    <FitBelt sketch={sketch} onAction={onAction}/>
   </section>;
 }

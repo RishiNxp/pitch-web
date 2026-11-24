@@ -718,3 +718,4 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline-width:
   .toolbar-group.primary-tools { flex: 1 1 100%; flex-wrap: wrap; }
   .toolbar-more { margin-right: auto; }
 }
+@keyframes pitch-spin { to { transform:rotate(360deg) } }
