@@ -25,7 +25,7 @@ export type SketchAction =
   | { type: 'SET_GEAR_MODULE'; id: string; moduleMm: number }
   | { type: 'UPDATE_GEAR'; id: string; toothCount: number }
   | { type: 'ADD_IDLER'; idler: Idler; segment?: { fromId: string; toId: string }; beltId?: string }
-  | { type: 'LATCH_IDLER'; id: string; beltId: string; fromId: string; toId: string; point: Point }
+  | { type: 'LATCH_IDLER'; id: string; beltId: string; fromId: string; toId: string; point: Point; tensionSide?: Idler['tensionSide'] }
   | { type: 'UNLATCH_IDLER'; id: string }
   | { type: 'UPDATE_PULLEY'; id: string; changes: Partial<Pick<Pulley, 'label' | 'toothCount' | 'profile'>> }
   | { type: 'UPDATE_IDLER'; id: string; changes: Partial<Pick<Idler, 'label' | 'diameterMm' | 'tensionSide'>> }
@@ -373,7 +373,7 @@ function reducePresent(sketch: Sketch, action: Exclude<SketchAction, { type: 'UN
       return {
         ...sketch,
         idlers: sketch.idlers.map(item => item.id === idler.id
-          ? { ...item, x: action.point.x, y: action.point.y, beltId: belt.id, locked: true, tensionSide: item.tensionSide ?? 'outside' }
+          ? { ...item, x: action.point.x, y: action.point.y, beltId: belt.id, locked: true, tensionSide: action.tensionSide ?? item.tensionSide ?? 'outside' }
           : item),
         transmission: { ...transmission, belts: transmission.belts.map(item => item.id === belt.id ? updatedBelt : item) },
         ...(sketch.activeBeltId === belt.id ? { route: [...route], profile: belt.profile } : {}),

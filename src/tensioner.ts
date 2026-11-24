@@ -33,6 +33,12 @@ export function removeIdlerFromBeltRoute(sketch: Pick<Sketch, 'pulleys'>, route:
   return pulleys >= 2 && members.length >= 2 ? [...members, members[0]!] : [];
 }
 
+export function tensionSideForApproach(sketch: Sketch, span: LineSegment, point: Point): TensionSide {
+  const cross = (span.end.x - span.start.x) * (point.y - span.start.y)
+    - (span.end.y - span.start.y) * (point.x - span.start.x);
+  return cross * beltWinding(sketch) > 1e-7 ? 'inside' : 'outside';
+}
+
 export function createTensionerOnSpan(
   sketch: Sketch,
   span: LineSegment,

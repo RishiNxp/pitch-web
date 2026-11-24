@@ -13,7 +13,7 @@ import type {
   SketchDimension,
   SketchTool,
 } from '../model';
-import { createTensionerOnSpan, findBeltSpan, removeIdlerFromBeltRoute } from '../tensioner';
+import { createTensionerOnSpan, findBeltSpan, removeIdlerFromBeltRoute, tensionSideForApproach } from '../tensioner';
 import {
   fitViewportToObjects,
   panView,
@@ -485,7 +485,7 @@ export default function SketchCanvas(props: SketchCanvasProps) {
         const route=insertRouteMember(stageSketch.route,span.fromId,span.toId,pulley.id);
         if (!route || !calculateBeltGeometry({...stageSketch,route,pulleys:stageSketch.pulleys.map(p=>p.id===pulley.id?{...p,...worldAt(screen)}:p)}).valid) continue;
       }
-      if (idler && !idlerIsLocked(sketch,idler) && !createTensionerOnSpan(stageSketch,span,worldAt(screen),idler.id,idler.tensionSide,idler.diameterMm)) continue;
+      if (idler && !idlerIsLocked(sketch,idler) && !createTensionerOnSpan(stageSketch,span,worldAt(screen),idler.id,tensionSideForApproach(stageSketch,span,worldAt(screen)),idler.diameterMm)) continue;
       const start = worldToScreen(span.start, cameraRef.current, size);
       const end = worldToScreen(span.end, cameraRef.current, size);
       const dx = end.x - start.x;
@@ -800,7 +800,7 @@ export default function SketchCanvas(props: SketchCanvasProps) {
       if (!drag.started) { drag.started = true; svgRef.current?.setPointerCapture(event.pointerId); onBeginDrag(drag.id); }
       onMoveObject(drag.id, { x: world.x + drag.offset.x, y: world.y + drag.offset.y });
       const freePulley = sketch.pulleys.find(p=>p.id===drag.id) && !sketch.transmission?.belts.some(b=>b.route.includes(drag.id));
-      if (freePulley || sketch.idlers.some(idler => idler.id === drag.id)) {
+      if (freePulley || (!drag.lockedBeltId && sketch.idlers.some(idler => idler.id === drag.id))) {
         const target = nearestBeltSpanAt({ x: screen.x + drag.offset.x * cameraRef.current.zoom, y: screen.y - drag.offset.y * cameraRef.current.zoom }, drag.lockedBeltId, drag.id);
         setSnapSpan(target?.span ?? null);
         if (target) {
@@ -829,7 +829,7 @@ export default function SketchCanvas(props: SketchCanvasProps) {
         const index = route?.indexOf(idler.id) ?? -1;
         const sameSpan = route && index > 0 && target && route[index - 1] === target.span.fromId && route[index + 1] === target.span.toId;
         if (target && !sameSpan) {
-          const attached = onLatchIdlerOnSpan(idler.id, target.beltId, target.span, worldAt(screen));
+          const attached = onLatchIdlerOnSpan(idler.id, target.beltId, target.span, { x: idler.x, y: idler.y });
           if (!attached) {
             if (drag.lockedBeltId) onMoveObject(idler.id, drag.startPoint);
             onNotice('No clearance to attach this tensioner here. Try another belt span or a smaller diameter.');

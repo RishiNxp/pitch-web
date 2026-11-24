@@ -12,7 +12,7 @@ import Icon from './components/Icon';
 import { calculateBeltGeometry } from './geometry';
 import { parseSketchJson } from './persistence';
 import type { BeltGeometryResult, HistoryState, LineSegment, Point, Sketch, SketchDimension, SketchTool } from './model';
-import { createTensionerOnSpan, removeIdlerFromBeltRoute } from './tensioner';
+import { createTensionerOnSpan, removeIdlerFromBeltRoute, tensionSideForApproach } from './tensioner';
 import { createPulleyOnSpan } from './pulleyPlacement';
 import { reduceSketch } from './state';
 import type { SketchAction } from './state';
@@ -226,7 +226,7 @@ export default function App() {
     const id = nextId('T', sketch);
     const belt = sketch.transmission?.belts.find(item => item.id === beltId);
     const stageSketch = belt ? sketchForBeltStage(sketch, belt) : sketch;
-    const idler = createTensionerOnSpan(stageSketch, span, point, id);
+    const idler = createTensionerOnSpan(stageSketch, span, point, id, tensionSideForApproach(stageSketch, span, point));
     if (!idler) {
       setInteractionNotice('No clearance for a tensioner on this span. Choose another straight span.');
       return;
@@ -244,9 +244,9 @@ export default function App() {
     if (!idler || !belt) return false;
     const route = removeIdlerFromBeltRoute(sketch, belt.route, idlerId);
     const stageSketch = sketchForBeltStage(sketch, { ...belt, route });
-    const snapped = createTensionerOnSpan(stageSketch, span, point, idlerId, idler.tensionSide ?? 'outside', idler.diameterMm);
+    const snapped = createTensionerOnSpan(stageSketch, span, point, idlerId, tensionSideForApproach(stageSketch, span, point), idler.diameterMm);
     if (!snapped) return false;
-    dispatch({ type: 'LATCH_IDLER', id: idlerId, beltId, fromId: span.fromId, toId: span.toId, point: { x: snapped.x, y: snapped.y } });
+    dispatch({ type: 'LATCH_IDLER', id: idlerId, beltId, tensionSide: snapped.tensionSide, fromId: span.fromId, toId: span.toId, point: { x: snapped.x, y: snapped.y } });
     return true;
   };
 
